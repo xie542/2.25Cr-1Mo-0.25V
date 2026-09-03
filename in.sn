@@ -1,0 +1,9 @@
+units metal
+atom_style  atomic
+read_data   boundary.data  extra/atom/types 2
+set type 1 type/ratio 2 0.07314 23412 # Cr
+set type 1 type/ratio 3 0.01014 87431 # C
+read_data    matrix.data add append
+mass            2 51.9961 #Cr
+mass            3 12.011 #C
+write_data      all.data

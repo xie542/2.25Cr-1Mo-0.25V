@@ -1,0 +1,122 @@
+# 初始化设置
+units 		metal
+dimension 	3
+boundary 	p p p
+atom_style 	atomic
+neighbor    2 bin
+neigh_modify    delay 5 every 1 check yes
+timestep        0.001
+
+#--------模型设置  
+read_data     all.data extra/atom/types 2 #  200*80*80
+
+set type 1 type/ratio 4 0.00608 23451 # Mo
+set type 1 type/ratio 5 0.00288 34671 # V
+
+
+#质量
+mass            1 55.845 #Fe
+mass            2 51.9961 #Cr
+mass            3 12.011 #C
+mass            4 95.94  #Mo
+mass            5 50.9415 #V
+
+
+#保存模型date文件
+write_data      FeCrCMoV.data
+
+#力场设置
+pair_style hybrid eam/alloy meam meam  lj/cut 10
+pair_coeff * * eam/alloy  FeCr.eam.alloy   Fe Cr NULL NULL NULL  
+pair_coeff * * meam 1 C.library.meam C C.meam   NULL NULL C NULL  NULL
+pair_coeff * * meam 2 VMo.library.meam V Mo VMo.meam.txt NULL NULL NULL Mo V 
+pair_coeff 1 3 lj/cut 0.0356 2.809
+pair_coeff 1 4 lj/cut 0.6641 2.5332
+pair_coeff 1 5 lj/cut 0.0358 2.662 
+pair_coeff 2 3 lj/cut 0.0347 2.818
+pair_coeff 2 4 lj/cut 0.1349 2.770
+pair_coeff 2 5 lj/cut 0.2387 2.710 
+pair_coeff 3 4 lj/cut 0.2621 3.134
+pair_coeff 3 5 lj/cut 0.02179 3.480
+
+
+
+#热力学输出
+thermo          100
+thermo_style    custom step temp  pe ke press lx ly lz enthalpy etotal
+
+delete_atoms overlap 1.5 all all
+reset_atoms       id 
+
+compute   spa    all stress/atom NULL
+compute   volum  all voronoi/atom 
+variable   spaxx atom c_spa[1]/(c_volum[1]+0.01)*(1/10000)
+variable   spayy atom c_spa[2]/(c_volum[1]+0.01)*(1/10000)
+variable   spazz atom c_spa[3]/(c_volum[1]+0.01)*(1/10000)
+variable   spaxy atom c_spa[4]/(c_volum[1]+0.01)*(1/10000)
+variable   spaxz atom c_spa[5]/(c_volum[1]+0.01)*(1/10000)
+variable   spayz atom c_spa[6]/(c_volum[1]+0.01)*(1/10000)
+variable   Mises  atom sqrt(((v_spaxx-v_spayy)^2+(v_spayy-v_spazz)^2+(v_spaxx-v_spazz)^2+6*(v_spaxy^2+v_spaxz^2+v_spayz^2))/2)
+
+
+#能量最小化
+#dump            1 all custom 100 FeCrCMoV_mini.XYZ id type x y z
+dump   1 all custom 100 FeCrCMoV_mini.xyz id type x y z   v_Mises 
+min_style       cg
+minimize        1e-15       1e-15  5000        5000
+undump          1
+reset_timestep  0
+
+
+#速度初始化
+velocity all  create 300 876848 
+
+
+#弛豫50ps采用npt消除内应力
+dump    1 all custom 1000 FeCrCMoV_npt.xyz id type x y z  v_Mises 
+
+fix     1 all npt temp 798 798 0.1 aniso 0 0 1
+run     50000
+undump	1
+unfix	1
+reset_timestep 0
+
+#应力应变输出
+variable tmp equal "lx"
+variable L0 equal ${tmp}
+variable strain equal "(lx - v_L0)/v_L0"
+variable p1 equal "v_strain"
+variable p2 equal "-pxx/10000"
+fix def1 all print 100 "${p1} ${p2}" file strain_stress.txt screen no
+
+#定义拉伸应变速率
+variable srate equal 1.0e10
+variable srate1 equal "v_srate / 1.0e12"
+
+#计算x方向应力分布，c_spa[1]也可以替换为 v_spaxx
+compute        ch_id all chunk/atom bin/1d x lower 0.01 units reduced
+fix             ave_ch all ave/chunk 1 100 100 ch_id c_spa[1] file stressx.txt
+
+#计算MSD
+compute 1 all msd com yes 
+variable msdx equal c_1[1] 
+variable msdy equal c_1[2] 
+variable msdz equal c_1[3] 
+variable msd equal  c_1[4] 
+variable istep equal step 
+fix msd all print 100 "${istep} ${msdx} ${msdy} ${msdz} ${msd}" screen no file msd.dat
+
+
+
+#计算rdf
+compute gofr all rdf 100 1 1 1 2 1 3 1 4 1 5 2 2 2 3 2 4 2 5 3 3 3 4 3 5 4 4 4 5 5 5 # Fe-Fe, Fe-Cr, Fe-C,Fe-Mo,Fe-V,Cr-Cr,Cr-C,Cr-Mo，Cr-V,C-C，C-Mo,C-V,Mo-Mo,Mo-V,V-V
+fix rdf all ave/time 1 1000 1000 c_gofr[*] file spce-rdf.dat mode vector
+
+#保存拉伸轨迹文件
+
+dump  1 all custom 100 tensile.xyz type x y z v_Mises
+
+#nvt下deform拉伸方式
+fix 1 all nvt temp 798 798 0.1
+fix 2 all deform 100 x erate ${srate1} units box remap x
+run 30000
