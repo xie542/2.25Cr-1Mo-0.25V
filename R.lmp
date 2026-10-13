@@ -1,0 +1,25 @@
+# 初始化设置
+units 		metal
+dimension 	3
+boundary 	p p p
+atom_style 	atomic
+neighbor    2 bin
+neigh_modify    delay 5 every 1 check yes
+timestep        0.001
+
+#--------模型设置  
+read_data     final.lmp extra/atom/types 4 #  200*80*80
+
+set type 1 type/ratio 2 0.01881 23412 # Cr
+set type 1 type/ratio 3 0.002607 87431 # C
+set type 1 type/ratio 4 0.005951 23451 # Mo
+set type 1 type/ratio 5 0.002819 34671 # V
+
+#质量
+mass            1 55.845 #Fe
+mass            2 51.9961 #Cr
+mass            3 12.011 #C
+mass            4 95.94  #Mo
+mass            5 50.9415 #V
+#保存模型date文件
+write_data      FeCrCMoVR.data
